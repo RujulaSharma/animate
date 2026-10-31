@@ -1,54 +1,162 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
-import * as THREE from 'three';
-import { clamp, smooth, hash, createParticleData, textCloud } from '../utils/particles';
+'use client';
 
+import { useEffect, useMemo, useRef } from 'react';
+import { useFrame } from '@react-three/fiber';
+import * as THREE from 'three';
+import { clamp, smooth, hash, createParticleData, textCloud } from '@/lib/standalone-orb-particles';
+import { useLightTheme } from './theme-toggle';
+
+// ==========================================
+// 1. Digital Earth Particle Shader
+// ==========================================
 const vertexShader = `
 attribute vec3 color;
 attribute float aSeed;
 attribute float aText;
+attribute float aLand;
 uniform float uTime;
 uniform float uDpr;
 uniform float uHover;
 uniform float uOrb;
+uniform float uLight;
 varying vec3 vColor;
 varying float vAlpha;
+
 void main() {
   vec3 p = position;
   vec3 n = normalize(p + vec3(.0001));
   float shell = (1. - aText) * uOrb;
-  // Coherent travelling waves give the shell a fluid surface, without frame uploads.
+
+  // Multi-layered waves for fluid surface & network dynamics
   float wave = sin(p.y * 4.5 + p.x * 1.7 - uTime * .65)
              * sin(p.z * 3.4 - p.y * 1.3 + uTime * .42);
   float fine = sin(p.x * 11. + p.z * 7. + uTime * .8) * .012;
-  p += n * (wave * .065 + fine) * shell;
-  p.x += sin(p.y * 3. + uTime * .38) * .028 * shell;
-  p.z += cos(p.y * 4. - uTime * .32) * .025 * shell;
+  p += n * (wave * .055 + fine) * shell;
+  p.x += sin(p.y * 3. + uTime * .38) * .024 * shell;
+  p.z += cos(p.y * 4. - uTime * .32) * .022 * shell;
+
   vec4 mv = modelViewMatrix * vec4(p, 1.0);
   vec3 viewDir = normalize(vec3(0., 0., 6.6) - p);
-  float rim = pow(1. - abs(dot(n, viewDir)), 2.2);
+
+  // Intense violet/purple luminous outline (rim lighting)
+  float rim = pow(1. - abs(dot(n, viewDir)), 1.8);
   float key = pow(max(0., dot(n, normalize(vec3(-.85, .85, 1.0)))), 2.);
   float front = smoothstep(-.8, 1.4, p.z);
-  float light = .10 + key * .9 + rim * .75;
-  float shimmer = .88 + .12 * sin(uTime * (1.2 + uHover * aText * 8.) + aSeed * 80.);
-  vec3 shellColor = mix(vec3(.40, .24, .76), vec3(.94, .92, 1.), clamp(key + rim * .7, 0., 1.));
-  vColor = mix(mix(color, shellColor, uOrb) * mix(1.15, light * 1.5, uOrb), color * (1.55 + uHover * .65), aText) * shimmer;
-  vAlpha = mix(mix(.72, (.12 + front * .62) * (.38 + rim * .7 + key * .8), uOrb), .95, aText);
-  gl_PointSize = clamp((aText > .5 ? 2.3 : 1.25 + aSeed * 1.5) * uDpr * 6. / -mv.z, 1., 7. * uDpr);
+  float light = .12 + key * 1.1 + rim * .95;
+
+  // Subtle twinkle & shimmering on continents & wordmark (smooth & elegant)
+  float shimmer = .84 + .16 * sin(uTime * (1.2 + uHover * aText * 6. + aLand * 2.2) + aSeed * 75.);
+
+  // Vivid cosmic palette: deep indigo -> electric violet -> core white
+  vec3 deepViolet = vec3(.24, .10, .58);
+  vec3 midLilac   = vec3(.62, .38, 1.00);
+  vec3 coreWhite  = vec3(.96, .94, 1.00);
+  float blend = clamp(key * 1.15 + rim * .9, 0., 1.);
+  vec3 shellColor = mix(deepViolet, mix(midLilac, coreWhite, blend), blend);
+
+  // Continent points glow with bright white-lilac particles
+  vec3 landColor = mix(color, coreWhite, 0.45 * key + 0.35 * rim);
+  vec3 finalOrbColor = mix(shellColor, landColor, aLand * 0.75);
+
+  vColor = mix(mix(color, finalOrbColor, uOrb) * mix(1.2, light * 1.6, uOrb), color * (1.6 + uHover * .65), aText) * shimmer;
+  vAlpha = mix(mix(.68, (.15 + front * .65) * (.42 + rim * .8 + key * .85), uOrb), .97, aText);
+  vAlpha = mix(vAlpha, min(1.0, vAlpha * 1.35), aLand * uOrb);
+
+  // Light mode ink particles with illuminated edges
+  vec3 ink = mix(vec3(.16, .055, .31), vec3(.42, .20, .65), key * .65 + rim * .35);
+  vColor = mix(vColor, mix(ink, vec3(.20, .07, .36), aText) * shimmer, uLight);
+  float inkAlpha = mix((.18 + front * .63 + rim * .25), 1.0, aText);
+  vAlpha = mix(vAlpha, inkAlpha, uLight);
+
+  float baseSize = aText > .5 ? 2.5 : (mix(1.2, 2.2, aLand) + aSeed * 1.6);
+  gl_PointSize = clamp(baseSize * uDpr * 8.0 / -mv.z, 0.8, 9. * uDpr);
   gl_Position = projectionMatrix * mv;
 }`;
+
 const fragmentShader = `
+uniform float uLight;
 varying vec3 vColor;
 varying float vAlpha;
 void main() {
   float r = length(gl_PointCoord - .5) * 2.;
   if (r > 1.) discard;
-  float core = exp(-r * r * 13.);
-  float halo = exp(-r * r * 3.) * .20;
-  gl_FragColor = vec4(vColor, (core + halo) * vAlpha);
+  float core = exp(-r * r * mix(11., 5.5, uLight));
+  float halo = exp(-r * r * 2.2) * mix(.30, .06, uLight);
+  float flare = exp(-r * r * 50.) * mix(.22, 0., uLight);
+  gl_FragColor = vec4(vColor, (core + halo + flare) * vAlpha);
 }`;
 
-function ParticleField({ count, mode, pointer, gesture, reduced, stage }) {
+// ==========================================
+// 2. Delicate 3D Orbital Wireframe Rings Around Globe
+// (Fast-moving dots removed; clean luminous orbital tracks preserved)
+// ==========================================
+function GlobeOrbitalRings({ lightTheme, uOrbRef }) {
+  // 5 distinct 3D orbital trajectory loops wrapping around the globe
+  const orbitConfigs = useMemo(() => [
+    { tilt: [0.55, 0.35, 0.25],   radius: 2.38 },
+    { tilt: [-0.95, -0.45, 0.65],  radius: 2.52 },
+    { tilt: [1.25, 0.20, -0.55],   radius: 2.65 },
+    { tilt: [-0.35, 1.30, 0.40],   radius: 2.48 },
+    { tilt: [0.70, -0.85, 1.15],   radius: 2.42 },
+  ], []);
+
+  // Continuous thin wireframe ring lines wrapping in 3D
+  const lineGeometries = useMemo(() => {
+    return orbitConfigs.map((cfg) => {
+      const segs = 180;
+      const pos = [];
+      for (let i = 0; i < segs; i++) {
+        const a1 = (i / segs) * Math.PI * 2;
+        const a2 = ((i + 1) / segs) * Math.PI * 2;
+        pos.push(Math.cos(a1) * cfg.radius, 0, Math.sin(a1) * cfg.radius);
+        pos.push(Math.cos(a2) * cfg.radius, 0, Math.sin(a2) * cfg.radius);
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
+      return g;
+    });
+  }, [orbitConfigs]);
+
+  const lineMaterial = useMemo(() => new THREE.LineBasicMaterial({
+    color: new THREE.Color('#9366f8'),
+    transparent: true,
+    opacity: 0.24,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false
+  }), []);
+
+  useEffect(() => () => {
+    lineGeometries.forEach(g => g.dispose());
+    lineMaterial.dispose();
+  }, [lineGeometries, lineMaterial]);
+
+  useFrame(() => {
+    const orbVisibility = uOrbRef.current ?? 1;
+    lineMaterial.opacity = (lightTheme ? 0.10 : 0.24) * orbVisibility;
+    lineMaterial.blending = lightTheme ? THREE.NormalBlending : THREE.AdditiveBlending;
+    lineMaterial.color.set(lightTheme ? '#6236b5' : '#9366f8');
+  });
+
+  return (
+    <group>
+      {orbitConfigs.map((cfg, i) => (
+        <group key={i} rotation={cfg.tilt}>
+          <lineSegments geometry={lineGeometries[i]} material={lineMaterial} frustumCulled={false} />
+        </group>
+      ))}
+    </group>
+  );
+}
+
+// ==========================================
+// 3. Main StandaloneOrb Component
+// ==========================================
+export function StandaloneOrb({ count, mode, control, transformRef }) {
+  const lightTheme = useLightTheme();
+  const pointer = useRef({ x: 0, y: 0, active: false });
+  const gesture = useRef({ dragging: false, dx: 0, dy: 0, vx: 0, vy: 0 });
+  const previous = useRef({ x: 0, y: 0, dragging: false });
+  const localCamera = useMemo(() => new THREE.PerspectiveCamera(), []);
   const state = useRef({ time: 0, morph: 0, clusters: 0, entrance: 0, tiltX: 0, tiltY: 0, labelX: 0, labelY: 0, labelVX: 0, labelVY: 0, pointerX: 0, pointerY: 0, pointerActive: false });
   const rotation = useMemo(() => new THREE.Quaternion(), []);
   const labelRotation = useMemo(() => new THREE.Quaternion(), []);
@@ -59,6 +167,8 @@ function ParticleField({ count, mode, pointer, gesture, reduced, stage }) {
   const matrix = useMemo(() => new THREE.Matrix4(), []);
   const idleMatrix = useMemo(() => new THREE.Matrix4(), []);
   const textMatrix = useMemo(() => new THREE.Matrix4(), []);
+  const uOrbRef = useRef(1);
+
   const data = useMemo(() => {
     const shellCount = count - 5000, labelCount = count - shellCount;
     const d = createParticleData(count), label = textCloud('DevHarbour', labelCount);
@@ -71,19 +181,49 @@ function ParticleField({ count, mode, pointer, gesture, reduced, stage }) {
     d.scatterVelocity = new Float32Array(labelCount * 3);
     return d;
   }, [count]);
+
   const geometry = useMemo(() => {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(data.home.slice(), 3).setUsage(THREE.DynamicDrawUsage));
     geo.setAttribute('color', new THREE.BufferAttribute(data.colors, 3));
     geo.setAttribute('aSeed', new THREE.BufferAttribute(Float32Array.from({ length: count }, (_, i) => hash(i + 5)), 1));
     geo.setAttribute('aText', new THREE.BufferAttribute(Float32Array.from({ length: count }, (_, i) => i >= data.shellCount ? 1 : 0), 1));
+    geo.setAttribute('aLand', new THREE.BufferAttribute(Float32Array.from({ length: count }, (_, i) => i < data.shellCount && data.land ? data.land[i] : 0), 1));
     return geo;
   }, [count, data]);
+
   const material = useMemo(() => new THREE.ShaderMaterial({ vertexShader, fragmentShader,
-    uniforms: { uTime: { value: 0 }, uDpr: { value: 1 }, uHover: { value: 0 }, uOrb: { value: 1 } },
+    uniforms: { uTime: { value: 0 }, uDpr: { value: 1 }, uHover: { value: 0 }, uOrb: { value: 1 }, uLight: { value: 0 } },
     transparent: true, depthWrite: false, vertexColors: false, blending: THREE.AdditiveBlending }), []);
+
   useEffect(() => () => { geometry.dispose(); material.dispose(); }, [geometry, material]);
-  useFrame(({ viewport, gl, camera, size }, delta) => {
+  useEffect(() => {
+    material.uniforms.uLight.value = lightTheme ? 1 : 0;
+    material.blending = lightTheme ? THREE.NormalBlending : THREE.AdditiveBlending;
+    material.needsUpdate = true;
+  }, [lightTheme, material]);
+
+  useFrame(({ viewport: worldViewport, gl, camera: worldCamera, size }, delta) => {
+    const ctl = control.current;
+    const scale = transformRef.current?.scale.x || 1;
+    const lift = transformRef.current?.position.y || 0;
+    localCamera.copy(worldCamera);
+    localCamera.position.set(0, -lift / scale, worldCamera.position.z / scale);
+    localCamera.updateMatrixWorld();
+    const camera = localCamera;
+    const viewport = { width: worldViewport.width / scale, height: worldViewport.height / scale };
+    pointer.current = { x: ctl.pointer.nx, y: -ctl.pointer.ny, active: ctl.pointer.inside };
+    const reduced = ctl.reduced;
+    const dragging = ctl.drag.active;
+    gesture.current.dx = dragging && previous.current.dragging ? ctl.pointer.px - previous.current.x : 0;
+    gesture.current.dy = dragging && previous.current.dragging ? ctl.pointer.py - previous.current.y : 0;
+    if (dragging && !previous.current.dragging) {
+      gesture.current.target = gesture.current.pickText?.(pointer.current.x, pointer.current.y) ? 'text' : 'sphere';
+      gesture.current.vx = 0;
+      gesture.current.vy = 0;
+    }
+    gesture.current.dragging = dragging;
+    previous.current = { x: ctl.pointer.px, y: ctl.pointer.py, dragging };
     const s = state.current, g = gesture.current, p = pointer.current;
     // Capped integration keeps spring motion stable after a suspended tab resumes.
     const dt = Math.min(delta, 1 / 30), damp = 1 - Math.exp(-dt * 5);
@@ -138,6 +278,7 @@ function ParticleField({ count, mode, pointer, gesture, reduced, stage }) {
     g.textHover = p.active && g.pickText(p.x, p.y);
     const m = smooth(s.morph), c = smooth(s.clusters), entrance = smooth(s.entrance);
     const insideOrb = (1 - m) * (1 - c);
+    uOrbRef.current = insideOrb;
     const stir = Math.hypot(movementX, movementY);
     const burst = Math.sin(Math.PI * m) ** 2 * .52;
     const cursorX = p.x * viewport.width / 2, cursorY = p.y * viewport.height / 2;
@@ -196,86 +337,12 @@ function ParticleField({ count, mode, pointer, gesture, reduced, stage }) {
       pos[o + 2] = z * entrance + data.random[o + 2] * (1 - entrance) + data.offset[o + 2] + scatterZ;
     }
     geometry.attributes.position.needsUpdate = true;
-    if (stage.current) {
-      stage.current.dataset.interaction = movingText ? 'moving-text' : g.dragging ? 'rotating' : g.textHover ? 'text-hover' : 'idle';
-      stage.current.style.setProperty('--cursor-x', `${50 + p.x * 30}%`);
-      stage.current.style.setProperty('--cursor-y', `${50 - p.y * 30}%`);
-      stage.current.style.setProperty('--cursor-glow', p.active ? '.7' : '0');
-    }
   });
-  return <points geometry={geometry} material={material} frustumCulled={false} />;
-}
-function canWebGL() {
-  try { return !!document.createElement('canvas').getContext('webgl2'); } catch { return false; }
-}
-export default function ParticleOrb({ mode, setMode, onCluster }) {
-  const [supported] = useState(canWebGL);
-  const [reduced, setReduced] = useState(() => matchMedia('(prefers-reduced-motion: reduce)').matches);
-  const [mobile, setMobile] = useState(() => innerWidth < 700);
-  const stage = useRef();
-  const pointer = useRef({ x: 0, y: 0, active: false });
-  const gesture = useRef({ dragging: false, id: null, dx: 0, dy: 0, vx: 0, vy: 0 });
-  const origin = useRef({});
-  const clickTimer = useRef(), resetTimer = useRef(), lastTap = useRef(0);
-  useEffect(() => {
-    const media = matchMedia('(prefers-reduced-motion: reduce)');
-    const change = () => setReduced(media.matches), resize = () => setMobile(innerWidth < 700);
-    media.addEventListener('change', change); window.addEventListener('resize', resize);
-    return () => { media.removeEventListener('change', change); window.removeEventListener('resize', resize); clearTimeout(clickTimer.current); clearTimeout(resetTimer.current); };
-  }, []);
-  const activateWord = () => {
-    clearTimeout(resetTimer.current); setMode('word');
-    resetTimer.current = setTimeout(() => setMode('orb'), reduced ? 1800 : 4600);
-  };
-  const toggleClusters = () => { clearTimeout(resetTimer.current); setMode(mode === 'clusters' ? 'orb' : 'clusters'); };
-  const updatePointer = event => {
-    const r = event.currentTarget.getBoundingClientRect();
-    pointer.current = { x: clamp((event.clientX - r.left) / r.width * 2 - 1, -1, 1), y: -clamp((event.clientY - r.top) / r.height * 2 - 1, -1, 1), active: true };
-  };
-  const down = event => {
-    if (gesture.current.id !== null || (event.pointerType === 'mouse' && event.button !== 0)) return;
-    updatePointer(event); clearTimeout(clickTimer.current);
-    event.currentTarget.setPointerCapture(event.pointerId);
-    const target = gesture.current.pickText?.(pointer.current.x, pointer.current.y) ? 'text' : 'sphere';
-    Object.assign(gesture.current, { dragging: true, target, id: event.pointerId, vx: 0, vy: 0, dx: 0, dy: 0 });
-    origin.current = { x: event.clientX, y: event.clientY, lastX: event.clientX, lastY: event.clientY, moved: false };
-  };
-  const move = event => {
-    if (gesture.current.id !== null && event.pointerId !== gesture.current.id) return;
-    updatePointer(event);
-    const g = gesture.current, o = origin.current;
-    if (!g.dragging) return;
-    if (Math.hypot(event.clientX - o.x, event.clientY - o.y) > 7) { o.moved = true; lastTap.current = 0; }
-    g.dx += event.clientX - o.lastX; g.dy += event.clientY - o.lastY;
-    o.lastX = event.clientX; o.lastY = event.clientY;
-  };
-  const finish = (event, cancel = false) => {
-    if (gesture.current.id !== event.pointerId) return;
-    gesture.current.dragging = false; gesture.current.id = null;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-    if (event.pointerType !== 'mouse') pointer.current.active = false;
-    if (cancel || origin.current.moved) { lastTap.current = 0; return; }
-    const now = performance.now();
-    if (lastTap.current && now - lastTap.current < 310) {
-      clearTimeout(clickTimer.current); lastTap.current = 0; toggleClusters();
-    } else {
-      lastTap.current = now;
-      clickTimer.current = setTimeout(() => { lastTap.current = 0; activateWord(); }, 310);
-    }
-  };
-  return <div ref={stage} className="orb-stage" data-mode={mode} aria-label="Interactive DevHarbour particle sculpture">
-    <div className="orb-aura" aria-hidden="true" />
-    {supported ? <div className="orb-canvas" onPointerDown={down} onPointerMove={move} onPointerUp={finish} onPointerCancel={e => finish(e, true)} onLostPointerCapture={e => { if (gesture.current.id === e.pointerId) finish(e, true); }} onPointerLeave={() => { pointer.current.active = false; }}>
-      <Canvas camera={{ position: [0, 0, 6.6], fov: 45 }} dpr={[1, mobile ? 1.4 : 1.75]} gl={{ alpha: true, antialias: false, powerPreference: 'high-performance' }}>
-        <ParticleField count={mobile ? 14000 : 29000} mode={mode} pointer={pointer} gesture={gesture} reduced={reduced} stage={stage} />
-      </Canvas>
-    </div> : <div className="webgl-fallback">DevHarbour<span>Enable WebGL to explore the particle universe.</span></div>}
-    {mode === 'clusters' && <div className="cluster-hotspots" aria-label="Feature clusters">{['Learn', 'Build', 'Connect'].map(item => <button key={item} className="cluster-hotspot" onClick={() => onCluster(item)}>Explore {item} <span>↗</span></button>)}</div>}
-    <div className="orbit-instructions"><span className="instruction-dot"/> GRAB TEXT TO MOVE <span className="dot-separator">·</span> DRAG ORB TO ROTATE <span className="dot-separator">·</span> CLICK TO TRANSFORM</div>
-    <div className="orb-keyboard-controls"><button onClick={activateWord}>Morph to text</button><button onClick={toggleClusters}>{mode === 'clusters' ? 'Reset sphere' : 'Explore clusters'}</button></div>
-    <span className="sr-only" role="status">{mode === 'word' ? 'Particles forming DEVHARBOUR. The sphere will return shortly.' : mode === 'clusters' ? 'Explore the Learn, Build and Connect clusters.' : 'Particle sphere with DevHarbour lettering. Drag to rotate, click to transform, or use the buttons below.'}</span>
-  </div>;
-}
 
-
-
+  return (
+    <group>
+      <points geometry={geometry} material={material} frustumCulled={false} />
+      <GlobeOrbitalRings lightTheme={lightTheme} uOrbRef={uOrbRef} />
+    </group>
+  );
+}

@@ -1,0 +1,210 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@theme inline {
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
+
+  --color-ink: var(--theme-ink);
+  --color-deep: var(--theme-deep);
+  --color-surface: var(--theme-surface);
+  --color-surface-2: var(--theme-surface-2);
+  --color-lav: var(--theme-lav);
+  --color-violet: var(--theme-violet);
+  --color-lilac: var(--theme-lilac);
+  --color-mist: var(--theme-mist);
+  --color-muted: var(--theme-muted);
+  --color-line: var(--theme-line);
+  --color-paper-ink: var(--theme-paper-ink);
+  --color-paper-muted: var(--theme-paper-muted);
+
+  --ease-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-spin-slow: spin 60s linear infinite;
+  --animate-dash: dash 2.4s linear infinite;
+  --animate-blink: blink 1s steps(2, start) infinite;
+  --animate-marquee: marquee 38s linear infinite;
+}
+
+@keyframes dash {
+  to {
+    stroke-dashoffset: -24;
+  }
+}
+@keyframes blink {
+  to {
+    visibility: hidden;
+  }
+}
+@keyframes marquee {
+  to {
+    transform: translateX(-50%);
+  }
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.97);
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes wave {
+  to {
+    stroke-dashoffset: -200;
+  }
+}
+
+:root {
+  --theme-ink: #08080e;
+  --theme-deep: #0b0b13;
+  --theme-surface: #11111d;
+  --theme-surface-2: #191827;
+  --theme-lav: #a78bfa;
+  --theme-violet: #6d4dcc;
+  --theme-lilac: #c9b9f5;
+  --theme-mist: #f4f1ff;
+  --theme-muted: #9995ac;
+  --theme-line: rgba(109, 77, 204, 0.16);
+  --theme-paper-ink: #eeebf7;
+  --theme-paper-muted: #9995ac;
+  color-scheme: dark;
+}
+
+html {
+  background: var(--color-ink);
+  scroll-behavior: auto;
+}
+
+body {
+  background: var(--color-ink);
+  color: var(--color-paper-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow-x: clip;
+}
+
+::selection {
+  background: var(--color-lav);
+  color: var(--color-ink);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-lav);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+.display {
+  line-height: 1.08;
+  letter-spacing: -0.045em;
+}
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+/* Lenis */
+html.lenis,
+html.lenis body {
+  height: auto;
+}
+.lenis:not(.lenis-autoToggle).lenis-stopped {
+  overflow: clip;
+}
+.lenis [data-lenis-prevent] {
+  overscroll-behavior: contain;
+}
+
+@theme inline {
+  --color-white: var(--theme-white);
+}
+:root { --theme-white: #ffffff; }
+:root[data-theme='light'] {
+  color-scheme: light;
+  --theme-ink: #f0eafa;
+  --theme-deep: #e7def5;
+  --theme-surface: #f7f2ff;
+  --theme-surface-2: #dfd2f1;
+  --theme-lav: #7040b5;
+  --theme-violet: #6735ab;
+  --theme-lilac: #553078;
+  --theme-muted: #746184;
+  --theme-line: rgba(81, 42, 123, 0.18);
+  --theme-paper-ink: #32164f;
+  --theme-paper-muted: #746184;
+  --theme-white: #32164f;
+}
+:root[data-theme='light'] #top {
+  background: radial-gradient(ellipse at 46% 38%, #fcfaff 0%, #f0eafa 48%, #e4d8f3 100%);
+}
+:root[data-theme='light'] .orb-node {
+  opacity: 0.86 !important;
+}
+:root[data-theme='light'] .orb-node .eyebrow {
+  color: #553078;
+  font-weight: 500;
+  text-shadow: 0 1px 6px #f4edff;
+}
+:root[data-theme='light'] #top p.eyebrow {
+  color: #715987;
+}
+:root[data-theme='light'] .theme-toggle {
+  background: #faf6ff;
+  border-color: #d6c4e9;
+  box-shadow: 0 4px 20px #5428800a, inset 0 1px 0 #fff;
+}
+.theme-toggle {
+  position: fixed;
+  top: max(20px, env(safe-area-inset-top));
+  right: max(20px, env(safe-area-inset-right));
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 44px;
+  padding: 10px 16px;
+  border: 1px solid var(--theme-line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--theme-surface) 85%, transparent);
+  color: var(--theme-paper-ink);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 4px 24px #0000000d;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color .2s, background .2s;
+}
+.theme-toggle:hover { border-color: var(--theme-lav); }
+@media(max-width: 480px) {
+  .theme-toggle { top: 14px; right: 14px; padding: 11px; }
+  .theme-toggle span { display: none; }
+}
+
+/* Keep light-mode hover details in a quiet dock below the sculpture. */
+:root[data-theme='light'] .orb-preview {
+  width: min(340px, calc(100% - 40px));
+  padding: 14px 18px;
+  border: 1px solid #d8c9ea;
+  background: rgb(252 249 255 / 94%);
+  box-shadow: 0 8px 32px #4823660c, inset 0 1px 0 #fff;
+  border-radius: 16px;
+}
+:root[data-theme='light'] .orb-preview > div { gap: 10px; }
+:root[data-theme='light'] .orb-preview > div > span:first-child { width: 28px; height: 28px; border-radius: 9px; }
+:root[data-theme='light'] .orb-preview > p { margin-top: 6px; font-size: 12px; line-height: 1.5; color: #695378; }
+:root[data-theme='light'] .orb-preview > button,
+:root[data-theme='light'] .orb-preview > span { display: none; }
+
+.cosmic-aura {
+  background: radial-gradient(ellipse at 50% 48%, transparent 16%, rgba(114, 64, 226, .08) 30%, transparent 49%), radial-gradient(ellipse at 50% 84%, rgba(124, 72, 232, .13), transparent 45%);
+}
+:root[data-theme='light'] .cosmic-aura {
+  background: radial-gradient(ellipse at 50% 48%, transparent 19%, rgba(143, 97, 199, .07) 33%, transparent 50%), radial-gradient(ellipse at 50% 84%, rgba(116, 66, 180, .09), transparent 44%);
+}

@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DevHarbour Cosmic Particle Earth Orb</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body, html {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: radial-gradient(ellipse at 50% 48%, #0d0a1c 0%, #06050e 55%, #030208 100%);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+      user-select: none;
+    }
+    #canvas-container {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      cursor: grab;
+    }
+    #canvas-container:active { cursor: grabbing; }
+
+    /* Ambient corona bloom */
+    .corona-glow {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: radial-gradient(ellipse at 50% 48%, rgba(124, 58, 237, 0.22) 0%, rgba(76, 29, 149, 0.09) 35%, transparent 65%);
+    }
+    .platform-glow {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 32%;
+      pointer-events: none;
+      background: radial-gradient(ellipse at 50% 100%, rgba(109, 40, 217, 0.18) 0%, transparent 70%);
+    }
+
+    /* Tilted SVG Orbit */
+    .orbit-svg-wrap {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      perspective: 900px;
+      pointer-events: none;
+    }
+    .orbit-svg {
+      width: 94%;
+      max-width: 900px;
+      max-height: 900px;
+      transform: rotateX(74deg) rotateZ(-14deg);
+    }
+    .spin-slow {
+      animation: spin 60s linear infinite;
+    }
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+
+    /* Scroll Indicator */
+    .scroll-indicator {
+      position: absolute;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      color: rgba(200, 180, 255, 0.75);
+      pointer-events: none;
+      z-index: 10;
+    }
+    .mouse-pill {
+      width: 18px;
+      height: 28px;
+      border: 1px solid rgba(167, 139, 250, 0.4);
+      border-radius: 9999px;
+      display: flex;
+      justify-content: center;
+      padding-top: 6px;
+      box-shadow: 0 0 10px rgba(167, 139, 250, 0.25);
+    }
+    .mouse-wheel {
+      width: 4px;
+      height: 8px;
+      background: #c9b9f5;
+      border-radius: 9999px;
+      animation: bounce 1.8s infinite;
+    }
+    @keyframes bounce {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(4px); }
+    }
+    .scroll-text {
+      font-size: 0.58rem;
+      letter-spacing: 0.25em;
+      text-transform: uppercase;
+      font-family: monospace;
+    }
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+  <div class="corona-glow"></div>
+  <div class="platform-glow"></div>
+
+  <div class="orbit-svg-wrap">
+    <div class="orbit-svg">
+      <svg viewBox="0 0 800 800" class="spin-slow" style="width: 100%; height: 100%;">
+        <defs>
+          <path id="orbit-path" d="M400 400 m-370 0 a370 370 0 1 1 740 0 a370 370 0 1 1 -740 0" />
+        </defs>
+        <circle cx="400" cy="400" r="370" fill="none" stroke="rgba(167, 139, 250, 0.22)" stroke-width="1" stroke-dasharray="2 10" />
+        <text fill="#c9b9f5" fill-opacity="0.65" font-size="17" font-family="monospace" letter-spacing="9">
+          <textPath href="#orbit-path" textLength="2300" lengthAdjust="spacing">
+            LEARN · BUILD · COMPETE · CONNECT · LEARN · BUILD · COMPETE · CONNECT ·
+          </textPath>
+        </text>
+      </svg>
+    </div>
+  </div>
+
+  <div id="canvas-container"></div>
+
+  <div class="scroll-indicator">
+    <div class="mouse-pill">
+      <div class="mouse-wheel"></div>
+    </div>
+    <span class="scroll-text">Scroll to Explore</span>
+  </div>
+
+  <script>
+    // --- 1. Math & Geography Utilities ---
+    const clamp = (n, a = 0, b = 1) => Math.max(a, Math.min(b, n));
+    const hash = n => { const x = Math.sin(n * 127.1 + 31.7) * 43758.5453; return x - Math.floor(x); };
+
+    function pointInPoly(pt, vs) {
+      const x = pt[0], y = pt[1];
+      let inside = false;
+      for (let i = 0, j = vs.length - 1; i < vs.length; j = i++) {
+        const xi = vs[i][0], yi = vs[i][1];
+        const xj = vs[j][0], yj = vs[j][1];
+        const intersect = (yi > y !== yj > y) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+        if (intersect) inside = !inside;
+      }
+      return inside;
+    }
+
+    const WORLD_CONTINENTS = [
+      [[-168,65],[-165,71],[-140,70],[-130,68],[-120,69],[-95,70],[-82,65],[-64,62],[-55,50],[-65,44],[-75,35],[-80,25],[-82,14],[-77,8],[-83,9],[-90,15],[-98,20],[-105,23],[-110,30],[-117,32],[-124,38],[-125,49],[-136,58],[-150,60],[-165,60]],
+      [[-55,60],[-40,60],[-20,70],[-18,78],[-30,83],[-50,82],[-60,76],[-55,60]],
+      [[-77,8],[-72,12],[-60,10],[-50,0],[-35,-5],[-38,-15],[-48,-28],[-58,-38],[-65,-50],[-70,-55],[-75,-50],[-72,-40],[-70,-20],[-80,-5],[-77,8]],
+      [[-9,38],[-9,43],[0,46],[5,53],[10,54],[8,57],[15,56],[20,55],[25,60],[28,70],[35,68],[45,68],[60,60],[50,50],[40,45],[30,42],[24,37],[15,40],[14,45],[3,43],[-3,43],[-9,38]],
+      [[5,58],[10,65],[15,68],[25,71],[30,70],[25,65],[18,60],[12,57],[5,58]],
+      [[-6,36],[10,37],[25,32],[32,31],[35,25],[43,12],[51,11],[45,-12],[35,-25],[28,-34],[18,-34],[12,-15],[9,5],[-5,5],[-17,14],[-17,28],[-6,36]],
+      [[35,35],[45,40],[50,30],[55,25],[60,25],[68,24],[73,18],[78,8],[82,15],[90,22],[100,14],[105,10],[108,22],[120,32],[120,38],[130,42],[140,54],[150,59],[160,56],[170,60],[180,65],[170,68],[140,73],[120,74],[100,76],[80,73],[60,70],[45,68],[35,35]],
+      [[68,24],[73,18],[78,8],[82,15],[90,22],[88,26],[78,30],[70,28],[68,24]],
+      [[114,-22],[118,-35],[135,-35],[145,-38],[150,-35],[153,-28],[148,-19],[142,-11],[136,-12],[130,-14],[125,-15],[115,-20],[114,-22]],
+      [[130,32],[132,34],[137,35],[141,38],[141,43],[145,44],[142,40],[136,35],[130,32]],
+      [[-5,50],[2,51],[0,53],[-1,58],[-3,58],[-5,55],[-5,50]]
+    ];
+
+    function isWorldLand(lon, lat) {
+      for (let i = 0; i < WORLD_CONTINENTS.length; i++) {
+        if (pointInPoly([lon, lat], WORLD_CONTINENTS[i])) return true;
+      }
+      return false;
+    }
+
+    function textCloud(word, count, { spread = 3.35 } = {}) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 1600; canvas.height = 260;
+      const ctx = canvas.getContext('2d');
+      ctx.font = '700 205px Arial, sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#fff';
+      ctx.fillText(word, 800, 130, 1510);
+      const pixels = ctx.getImageData(0, 0, 1600, 260).data, samples = [];
+      for (let y = 0; y < 260; y += 3) for (let x = 0; x < 1600; x += 3) {
+        if (pixels[(y * 1600 + x) * 4 + 3] > 180) samples.push([x, y]);
+      }
+      const result = new Float32Array(count * 3);
+      for (let i = 0; i < count; i++) {
+        const [x, y] = samples[Math.min(samples.length - 1, Math.floor((i + hash(i)) / count * samples.length))];
+        result[i * 3] = (x / 1600 - .5) * spread;
+        result[i * 3 + 1] = -(y / 1600 - .5 * 260 / 1600) * spread;
+        result[i * 3 + 2] = (hash(i + 87) - .5) * .075;
+      }
+      return result;
+    }
+
+    // --- 2. Setup Three.js Scene ---
+    const container = document.getElementById('canvas-container');
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 0.1, 50);
+    camera.position.set(0, 0, 10);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: true, powerPreference: 'high-performance' });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    container.appendChild(renderer.domElement);
+
+    const mainGroup = new THREE.Group();
+    scene.add(mainGroup);
+
+    // --- 3. Digital Earth Particle Globe ---
+    const COUNT = 28000;
+    const SHELL_COUNT = COUNT - 5000;
+    const LABEL_COUNT = 5000;
+
+    const positions = new Float32Array(COUNT * 3);
+    const colors = new Float32Array(COUNT * 3);
+    const aSeeds = new Float32Array(COUNT);
+    const aTexts = new Float32Array(COUNT);
+    const aLands = new Float32Array(COUNT);
+
+    // Shell sphere points
+    for (let i = 0; i < SHELL_COUNT; i++) {
+      const y = 1 - 2 * (i + .5) / SHELL_COUNT;
+      const a = i * 2.39996323;
+      const ring = Math.sqrt(Math.max(0, 1 - y * y));
+      const lat = Math.asin(clamp(y, -1, 1)) * 180 / Math.PI;
+      const lon = ((a % (2 * Math.PI)) - Math.PI) * 180 / Math.PI;
+
+      const onLand = isWorldLand(lon, lat);
+      aLands[i] = onLand ? 1.0 : 0.0;
+      aSeeds[i] = hash(i + 5);
+      aTexts[i] = 0.0;
+
+      const dust = hash(i + 17) > .93;
+      const baseR = 2.08 + (onLand ? 0.015 : 0.0);
+      const r = baseR + (hash(i + 3) - .5) * 0.035 + (dust ? .10 + hash(i + 61) * .30 : 0);
+
+      const o = i * 3;
+      positions[o] = Math.cos(a) * ring * r;
+      positions[o + 1] = y * r;
+      positions[o + 2] = Math.sin(a) * ring * r;
+
+      const tone = hash(i + 100);
+      if (onLand) {
+        if (tone > 0.65) {
+          colors[o] = 0.96; colors[o + 1] = 0.95; colors[o + 2] = 1.0;
+        } else {
+          colors[o] = 0.76; colors[o + 1] = 0.58; colors[o + 2] = 1.0;
+        }
+      } else {
+        if (tone > 0.88) {
+          colors[o] = 0.62; colors[o + 1] = 0.44; colors[o + 2] = 0.95;
+        } else {
+          colors[o] = 0.32; colors[o + 1] = 0.16; colors[o + 2] = 0.68;
+        }
+      }
+    }
+
+    // Label glyph points (DevHarbour)
+    const labelPoints = textCloud('DevHarbour', LABEL_COUNT);
+    for (let i = 0; i < LABEL_COUNT; i++) {
+      const idx = SHELL_COUNT + i;
+      const o = idx * 3;
+      const lo = i * 3;
+      positions[o] = labelPoints[lo];
+      positions[o + 1] = labelPoints[lo + 1];
+      positions[o + 2] = labelPoints[lo + 2] + 0.30;
+      colors[o] = 0.95; colors[o + 1] = 0.92; colors[o + 2] = 1.0;
+      aSeeds[i] = hash(idx + 5);
+      aTexts[idx] = 1.0;
+      aLands[idx] = 0.0;
+    }
+
+    const orbGeometry = new THREE.BufferGeometry();
+    orbGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    orbGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    orbGeometry.setAttribute('aSeed', new THREE.BufferAttribute(aSeeds, 1));
+    orbGeometry.setAttribute('aText', new THREE.BufferAttribute(aTexts, 1));
+    orbGeometry.setAttribute('aLand', new THREE.BufferAttribute(aLands, 1));
+
+    const orbMaterial = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      uniforms: {
+        uTime: { value: 0 },
+        uDpr: { value: window.devicePixelRatio }
+      },
+      vertexShader: `
+        attribute vec3 color;
+        attribute float aSeed;
+        attribute float aText;
+        attribute float aLand;
+        uniform float uTime;
+        uniform float uDpr;
+        varying vec3 vColor;
+        varying float vAlpha;
+
+        void main() {
+          vec3 p = position;
+          vec3 n = normalize(p + vec3(.0001));
+          float shell = 1. - aText;
+
+          float wave = sin(p.y * 4.5 + p.x * 1.7 - uTime * .65) * sin(p.z * 3.4 - p.y * 1.3 + uTime * .42);
+          float fine = sin(p.x * 11. + p.z * 7. + uTime * .8) * .012;
+          p += n * (wave * .055 + fine) * shell;
+          p.x += sin(p.y * 3. + uTime * .38) * .024 * shell;
+          p.z += cos(p.y * 4. - uTime * .32) * .022 * shell;
+
+          vec4 mv = modelViewMatrix * vec4(p, 1.0);
+          vec3 viewDir = normalize(vec3(0., 0., 6.6) - p);
+
+          float rim = pow(1. - abs(dot(n, viewDir)), 1.8);
+          float key = pow(max(0., dot(n, normalize(vec3(-.85, .85, 1.0)))), 2.);
+          float front = smoothstep(-.8, 1.4, p.z);
+          float light = .12 + key * 1.1 + rim * .95;
+
+          float shimmer = .84 + .16 * sin(uTime * (1.2 + aLand * 2.2) + aSeed * 75.);
+
+          vec3 deepViolet = vec3(.24, .10, .58);
+          vec3 midLilac   = vec3(.62, .38, 1.00);
+          vec3 coreWhite  = vec3(.96, .94, 1.00);
+          float blend = clamp(key * 1.15 + rim * .9, 0., 1.);
+          vec3 shellColor = mix(deepViolet, mix(midLilac, coreWhite, blend), blend);
+
+          vec3 landColor = mix(color, coreWhite, 0.45 * key + 0.35 * rim);
+          vec3 finalOrbColor = mix(shellColor, landColor, aLand * 0.75);
+
+          vColor = mix(finalOrbColor * 1.2, color * 1.6, aText) * shimmer;
+          vAlpha = mix((.15 + front * .65) * (.42 + rim * .8 + key * .85), .97, aText);
+          vAlpha = mix(vAlpha, min(1.0, vAlpha * 1.35), aLand);
+
+          float baseSize = aText > .5 ? 2.5 : (mix(1.2, 2.2, aLand) + aSeed * 1.6);
+          gl_PointSize = clamp(baseSize * uDpr * 8.0 / -mv.z, 0.8, 9. * uDpr);
+          gl_Position = projectionMatrix * mv;
+        }
+      `,
+      fragmentShader: `
+        varying vec3 vColor;
+        varying float vAlpha;
+        void main() {
+          float r = length(gl_PointCoord - .5) * 2.;
+          if (r > 1.) discard;
+          float core = exp(-r * r * 11.);
+          float halo = exp(-r * r * 2.2) * .30;
+          float flare = exp(-r * r * 50.) * .22;
+          gl_FragColor = vec4(vColor, (core + halo + flare) * vAlpha);
+        }
+      `
+    });
+
+    const orbPoints = new THREE.Points(orbGeometry, orbMaterial);
+    mainGroup.add(orbPoints);
+
+    // --- 4. Delicate 3D Orbital Wireframe Rings Around Globe ---
+    const globeOrbitConfigs = [
+      { tilt: [0.55, 0.35, 0.25],   radius: 2.38 },
+      { tilt: [-0.95, -0.45, 0.65],  radius: 2.52 },
+      { tilt: [1.25, 0.20, -0.55],   radius: 2.65 },
+      { tilt: [-0.35, 1.30, 0.40],   radius: 2.48 },
+      { tilt: [0.70, -0.85, 1.15],   radius: 2.42 },
+    ];
+    const wireframeMaterial = new THREE.LineBasicMaterial({
+      color: new THREE.Color('#9366f8'),
+      transparent: true,
+      opacity: 0.24,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+
+    globeOrbitConfigs.forEach(cfg => {
+      const segs = 180;
+      const lPos = [];
+      for (let i = 0; i < segs; i++) {
+        const a1 = (i / segs) * Math.PI * 2;
+        const a2 = ((i + 1) / segs) * Math.PI * 2;
+        lPos.push(Math.cos(a1) * cfg.radius, 0, Math.sin(a1) * cfg.radius);
+        lPos.push(Math.cos(a2) * cfg.radius, 0, Math.sin(a2) * cfg.radius);
+      }
+      const lGeo = new THREE.BufferGeometry();
+      lGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(lPos), 3));
+      const lineSeg = new THREE.LineSegments(lGeo, wireframeMaterial);
+      lineSeg.rotation.set(...cfg.tilt);
+      mainGroup.add(lineSeg);
+    });
+
+    // --- 5. Tilted Concentric Holographic Platform (Below Globe) ---
+    const platformGroup = new THREE.Group();
+    platformGroup.rotation.set(0.42, 0, -0.04); // ~24 deg tilt
+    platformGroup.position.set(0, -2.35, 0);
+    scene.add(platformGroup);
+
+    const ringConfigs = [
+      { r: 2.8, count: 480,  width: 1.35 },
+      { r: 4.0, count: 640,  width: 1.40 },
+      { r: 5.4, count: 800,  width: 1.45 },
+      { r: 7.0, count: 960,  width: 1.50 },
+      { r: 8.8, count: 1120, width: 1.55 },
+      { r: 11.0,count: 1280, width: 1.60 },
+    ];
+
+    const platPos = [], platPhases = [], platSeeds = [], platSides = [];
+    ringConfigs.forEach((cfg, ringIdx) => {
+      for (let i = 0; i < cfg.count; i++) {
+        const angle = (i / cfg.count) * Math.PI * 2;
+        const seed = Math.abs(Math.sin(i * 127.1 + ringIdx * 311.7) * 43758.5453 % 1);
+        const rad = cfg.r + (seed - 0.5) * 0.035;
+        platPos.push(Math.cos(angle) * rad * cfg.width, (seed - 0.5) * 0.02, Math.sin(angle) * rad);
+        platPhases.push(angle + ringIdx * 0.8);
+        platSeeds.push(seed);
+        platSides.push(Math.pow(Math.abs(Math.cos(angle)), 4.0));
+      }
+    });
+
+    for (let gx = -14; gx <= 14; gx += 0.65) {
+      for (let gz = -9; gz <= 9; gz += 0.65) {
+        const dist = Math.hypot(gx / 1.50, gz);
+        if (dist < 2.5 || dist > 11.5) continue;
+        const seed = Math.abs(Math.sin(gx * 93.3 + gz * 419.7) * 43758.5453 % 1);
+        if (seed > 0.30) continue;
+        platPos.push(gx, (seed - 0.5) * 0.02, gz);
+        const angle = Math.atan2(gz, gx);
+        platPhases.push(angle);
+        platSeeds.push(seed);
+        platSides.push(Math.pow(Math.abs(Math.cos(angle)), 4.0) * (1.0 - dist / 12.0));
+      }
+    }
+
+    const platPointsGeo = new THREE.BufferGeometry();
+    platPointsGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(platPos), 3));
+    platPointsGeo.setAttribute('aPhase', new THREE.BufferAttribute(new Float32Array(platPhases), 1));
+    platPointsGeo.setAttribute('aSeed', new THREE.BufferAttribute(new Float32Array(platSeeds), 1));
+    platPointsGeo.setAttribute('aSide', new THREE.BufferAttribute(new Float32Array(platSides), 1));
+
+    const platPointsMaterial = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      uniforms: {
+        uTime: { value: 0 },
+        uDpr: { value: window.devicePixelRatio }
+      },
+      vertexShader: `
+        attribute float aPhase;
+        attribute float aSeed;
+        attribute float aSide;
+        uniform float uTime;
+        uniform float uDpr;
+        varying float vGlow;
+        varying float vAlpha;
+        varying float vSide;
+
+        void main() {
+          float wave = 0.5 + 0.5 * cos(aPhase * 4.0 - uTime * 0.28);
+          float pulse = pow(wave, 22.0);
+          float sidePulse = pow(aSide, 1.3) * (0.55 + 0.45 * sin(uTime * 0.6 + aPhase * 2.0));
+          vGlow = clamp(pulse + sidePulse * 0.8, 0.0, 1.0);
+          vSide = aSide;
+          vAlpha = 0.08 + aSeed * 0.12 + vGlow * 0.68 + sidePulse * 0.4;
+          vec4 mv = modelViewMatrix * vec4(position, 1.0);
+          gl_Position = projectionMatrix * mv;
+          float baseSize = 0.8 + aSeed * 0.6 + vGlow * 4.2 + sidePulse * 3.8;
+          gl_PointSize = clamp(baseSize * uDpr * 9.0 / -mv.z, 0.5, 11.0 * uDpr);
+        }
+      `,
+      fragmentShader: `
+        varying float vGlow;
+        varying float vAlpha;
+        varying float vSide;
+        void main() {
+          float r = length(gl_PointCoord - 0.5) * 2.0;
+          if (r > 1.0) discard;
+          vec3 deep = vec3(0.32, 0.14, 0.72);
+          vec3 lilac = vec3(0.68, 0.48, 1.00);
+          vec3 white = vec3(0.96, 0.94, 1.00);
+          vec3 col = mix(deep, mix(lilac, white, vGlow), vGlow);
+          col = mix(col, white, vSide * vGlow * 0.75);
+          float core = exp(-r * r * 4.5);
+          float flare = exp(-r * r * 50.0) * 0.28;
+          gl_FragColor = vec4(col, (core + flare) * vAlpha);
+        }
+      `
+    });
+
+    const platPoints = new THREE.Points(platPointsGeo, platPointsMaterial);
+    platformGroup.add(platPoints);
+
+    // Platform concentric lines
+    const platLinePos = [];
+    ringConfigs.forEach(cfg => {
+      const segs = 180;
+      for (let i = 0; i < segs; i++) {
+        const a1 = (i / segs) * Math.PI * 2;
+        const a2 = ((i + 1) / segs) * Math.PI * 2;
+        platLinePos.push(
+          Math.cos(a1) * cfg.r * cfg.width, 0, Math.sin(a1) * cfg.r,
+          Math.cos(a2) * cfg.r * cfg.width, 0, Math.sin(a2) * cfg.r
+        );
+      }
+    });
+    const platLineGeo = new THREE.BufferGeometry();
+    platLineGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(platLinePos), 3));
+    const platLineMat = new THREE.LineBasicMaterial({
+      color: new THREE.Color('#7c52f0'),
+      transparent: true,
+      opacity: 0.18,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+    platformGroup.add(new THREE.LineSegments(platLineGeo, platLineMat));
+
+    // Platform reflection pool
+    const refPos = [], refAlphas = [];
+    for (let i = 0; i < 720; i++) {
+      const angle = (i / 720) * Math.PI * 2;
+      const s = Math.abs(Math.sin(i * 37.1) * 43758.5453 % 1);
+      const rad = Math.sqrt(s) * 3.4;
+      refPos.push(Math.cos(angle) * rad * 1.45, 0, Math.sin(angle) * rad);
+      refAlphas.push(Math.max(0, 1.0 - rad / 3.4));
+    }
+    const refGeo = new THREE.BufferGeometry();
+    refGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(refPos), 3));
+    refGeo.setAttribute('aRefAlpha', new THREE.BufferAttribute(new Float32Array(refAlphas), 1));
+    const refMat = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+      uniforms: { uTime: { value: 0 }, uDpr: { value: window.devicePixelRatio } },
+      vertexShader: `
+        attribute float aRefAlpha;
+        uniform float uTime;
+        uniform float uDpr;
+        varying float vAlpha;
+        void main() {
+          vAlpha = aRefAlpha * (0.35 + 0.1 * sin(uTime * 1.2 + position.x * 2.0));
+          vec4 mv = modelViewMatrix * vec4(position, 1.0);
+          gl_Position = projectionMatrix * mv;
+          gl_PointSize = clamp(2.5 * uDpr * 8.0 / -mv.z, 0.8, 6.0 * uDpr);
+        }
+      `,
+      fragmentShader: `
+        varying float vAlpha;
+        void main() {
+          float r = length(gl_PointCoord - 0.5) * 2.0;
+          if (r > 1.0) discard;
+          gl_FragColor = vec4(vec3(0.55, 0.30, 0.95), exp(-r * r * 3.0) * vAlpha * 0.45);
+        }
+      `
+    });
+    platformGroup.add(new THREE.Points(refGeo, refMat));
+
+    // --- 6. Interaction & Mouse Drag ---
+    let isDragging = false;
+    let prevMouse = { x: 0, y: 0 };
+    let vel = { x: 0, y: 0 };
+    let rot = { x: 0.12, y: -0.4 };
+
+    window.addEventListener('pointerdown', e => {
+      isDragging = true;
+      prevMouse = { x: e.clientX, y: e.clientY };
+    });
+    window.addEventListener('pointermove', e => {
+      if (!isDragging) return;
+      const dx = e.clientX - prevMouse.x;
+      const dy = e.clientY - prevMouse.y;
+      prevMouse = { x: e.clientX, y: e.clientY };
+      vel.y = dx * 0.005;
+      vel.x = dy * 0.005;
+      rot.y += vel.y;
+      rot.x += vel.x;
+    });
+    window.addEventListener('pointerup', () => { isDragging = false; });
+
+    // --- 7. Animation Loop ---
+    const clock = new THREE.Clock();
+
+    function animate() {
+      requestAnimationFrame(animate);
+      const delta = clock.getDelta();
+      const time = clock.getElapsedTime();
+
+      if (!isDragging) {
+        vel.x *= Math.pow(0.92, delta * 60);
+        vel.y *= Math.pow(0.92, delta * 60);
+        rot.y += (vel.y + 0.05 * delta);
+        rot.x += vel.x;
+      }
+      rot.x = clamp(rot.x, -0.8, 0.8);
+
+      mainGroup.rotation.y = rot.y;
+      mainGroup.rotation.x = rot.x;
+
+      orbMaterial.uniforms.uTime.value = time;
+      platPointsMaterial.uniforms.uTime.value = time;
+      refMat.uniforms.uTime.value = time;
+
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+</body>
+</html>
